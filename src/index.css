@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 250 100% 4%;
+    --foreground: 210 40% 98%;
+
+    --card: 250 50% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 250 50% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 270 75% 65%;
+    --primary-foreground: 210 40% 98%;
+    
+    --primary-glow: 270 75% 75%;
+    --accent-cyan: 190 95% 50%;
+    
+    --secondary: 250 40% 15%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 250 30% 20%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 190 95% 50%;
+    --accent-foreground: 250 100% 4%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 250 30% 18%;
+    --input: 250 30% 18%;
+    --ring: 270 75% 65%;
+
+    --radius: 0.75rem;
+    
+    /* Graph specific colors */
+    --node-low: 220 80% 55%;
+    --node-medium: 270 75% 65%;
+    --node-high: 30 95% 60%;
+    
+    /* Glassmorphism */
+    --glass-bg: 250 50% 8% / 0.7;
+    --glass-border: 250 40% 30% / 0.3;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background: linear-gradient(135deg, hsl(250 100% 4%) 0%, hsl(260 80% 8%) 50%, hsl(250 100% 4%) 100%);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-card/70 backdrop-blur-xl border border-border/30 rounded-lg shadow-2xl;
+  }
+  
+  .glass-input {
+    @apply bg-background/50 backdrop-blur-sm border-border/50;
+  }
+}
