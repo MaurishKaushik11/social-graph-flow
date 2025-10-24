@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backend specific (now in api/)
+backend/node_modules
+backend/dist
+backend/*.db
+!api/
+api/node_modules
+api/dist
