@@ -1,49 +1,48 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getDatabase } from '../database/connection.js';
+import { supabase } from '../database/connection.js';
 import { calculatePopularityScore } from '../database/schema.js';
 import type { User, CreateUserRequest, UpdateUserRequest, Friendship, GraphData, GraphNode, GraphEdge } from '../types.js';
 import { createUserSchema, updateUserSchema } from '../validation.js';
 
 export class UserService {
-  constructor(private db: Promise<any> = getDatabase()) {}
 
   async getAllUsers(): Promise<User[]> {
-    const database = await this.db;
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, username, age, created_at')
+      .order('created_at', { ascending: false });
 
-    const users = await database.getDatabase().all(`
-      SELECT id, username, age, created_at
-      FROM users
-      ORDER BY created_at DESC
-    `);
+    if (error) throw new Error(error.message);
 
     // Get hobbies and scores for each user
     const usersWithDetails = await Promise.all(
       users.map(async (user: any) => {
-        const hobbies = await database.getDatabase().all(`
-          SELECT h.name
-          FROM hobbies h
-          INNER JOIN user_hobbies uh ON h.id = uh.hobby_id
-          WHERE uh.user_id = ?
-        `, [user.id]);
+        const { data: userHobbies } = await supabase
+          .from('user_hobbies')
+          .select(`
+            hobby_id,
+            hobbies (
+              name
+            )
+          `)
+          .eq('user_id', user.id);
 
-        const popularityScore = await calculatePopularityScore(database.getDatabase(), user.id);
+        const popularityScore = await calculatePopularityScore(user.id);
 
         // Get friends
-        const friends = await database.getDatabase().all(`
-          SELECT DISTINCT CASE
-            WHEN user_id_1 = ? THEN user_id_2
-            WHEN user_id_2 = ? THEN user_id_1
-          END as friend_id
-          FROM friendships
-          WHERE user_id_1 = ? OR user_id_2 = ?
-        `, [user.id, user.id, user.id, user.id]);
+        const { data: friendships } = await supabase
+          .from('friendships')
+          .select('user_id_1, user_id_2')
+          .or(`user_id_1.eq.${user.id},user_id_2.eq.${user.id}`);
+
+        const friends = friendships?.map((f: any) => f.user_id_1 === user.id ? f.user_id_2 : f.user_id_1) || [];
 
         return {
           id: user.id,
           username: user.username,
           age: user.age,
-          hobbies: hobbies.map((h: any) => h.name),
-          friends: friends.map((f: any) => f.friend_id),
+          hobbies: userHobbies?.map((uh: any) => uh.hobbies.name) || [],
+          friends,
           createdAt: user.created_at,
           popularityScore
         };
@@ -54,76 +53,74 @@ export class UserService {
   }
 
   async getUserById(id: string): Promise<User | null> {
-    const database = await this.db;
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, username, age, created_at')
+      .eq('id', id)
+      .single();
 
-    const user = await database.getDatabase().get(`
-      SELECT id, username, age, created_at
-      FROM users
-      WHERE id = ?
-    `, [id]);
+    if (error || !user) return null;
 
-    if (!user) return null;
+    const { data: userHobbies } = await supabase
+      .from('user_hobbies')
+      .select(`
+        hobby_id,
+        hobbies (
+          name
+        )
+      `)
+      .eq('user_id', id);
 
-    const hobbies = await database.getDatabase().all(`
-      SELECT h.name
-      FROM hobbies h
-      INNER JOIN user_hobbies uh ON h.id = uh.hobby_id
-      WHERE uh.user_id = ?
-    `, [id]);
+    const popularityScore = await calculatePopularityScore(id);
 
-    const popularityScore = await calculatePopularityScore(database.getDatabase(), id);
+    const { data: friendships } = await supabase
+      .from('friendships')
+      .select('user_id_1, user_id_2')
+      .or(`user_id_1.eq.${id},user_id_2.eq.${id}`);
 
-    const friends = await database.getDatabase().all(`
-      SELECT DISTINCT CASE
-        WHEN user_id_1 = ? THEN user_id_2
-        WHEN user_id_2 = ? THEN user_id_1
-      END as friend_id
-      FROM friendships
-      WHERE user_id_1 = ? OR user_id_2 = ?
-    `, [id, id, id, id]);
+    const friends = friendships?.map((f: any) => f.user_id_1 === id ? f.user_id_2 : f.user_id_1) || [];
 
     return {
       id: user.id,
       username: user.username,
       age: user.age,
-      hobbies: hobbies.map((h: any) => h.name),
-      friends: friends.map((f: any) => f.friend_id),
+      hobbies: userHobbies?.map((uh: any) => uh.hobbies.name) || [],
+      friends,
       createdAt: user.created_at,
       popularityScore
     };
   }
 
   async createUser(data: CreateUserRequest): Promise<User> {
-    const database = await this.db;
-
     // Validate input
     const validatedData = createUserSchema.parse(data);
 
     // Check if username already exists
-    const existingUser = await database.getDatabase().get(
-      'SELECT id FROM users WHERE username = ?',
-      [validatedData.username]
-    );
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('username', validatedData.username)
+      .single();
 
     if (existingUser) {
       throw new Error('Username already exists');
     }
 
     const userId = uuidv4();
-    const result = await database.getDatabase().run(
-      'INSERT INTO users (id, username, age) VALUES (?, ?, ?)',
-      [userId, validatedData.username, validatedData.age]
-    );
+    const { data: newUser, error } = await supabase
+      .from('users')
+      .insert({ id: userId, username: validatedData.username, age: validatedData.age })
+      .select()
+      .single();
+
+    if (error || !newUser) throw new Error('Failed to create user');
 
     const user = await this.getUserById(userId);
     if (!user) throw new Error('Failed to create user');
-
     return user;
   }
 
   async updateUser(id: string, data: UpdateUserRequest): Promise<User> {
-    const database = await this.db;
-
     // Validate input
     const validatedData = updateUserSchema.parse(data);
 
@@ -135,10 +132,12 @@ export class UserService {
 
     // Check if username is already taken by another user
     if (validatedData.username) {
-      const usernameCheck = await database.getDatabase().get(
-        'SELECT id FROM users WHERE username = ? AND id != ?',
-        [validatedData.username, id]
-      );
+      const { data: usernameCheck } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', validatedData.username)
+        .neq('id', id)
+        .single();
 
       if (usernameCheck) {
         throw new Error('Username already exists');
@@ -146,36 +145,25 @@ export class UserService {
     }
 
     // Update user
-    const updateFields = [];
-    const updateValues = [];
+    const updatePayload: any = {};
+    if (validatedData.username) updatePayload.username = validatedData.username;
+    if (validatedData.age !== undefined) updatePayload.age = validatedData.age;
 
-    if (validatedData.username) {
-      updateFields.push('username = ?');
-      updateValues.push(validatedData.username);
-    }
+    const { data: updatedUserData, error } = await supabase
+      .from('users')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (validatedData.age !== undefined) {
-      updateFields.push('age = ?');
-      updateValues.push(validatedData.age);
-    }
+    if (error || !updatedUserData) throw new Error('Failed to update user');
 
-    if (updateFields.length > 0) {
-      updateValues.push(id);
-      await database.getDatabase().run(
-        `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
-        updateValues
-      );
-    }
-
-    const updatedUser = await this.getUserById(id);
-    if (!updatedUser) throw new Error('Failed to update user');
-
-    return updatedUser;
+    const user = await this.getUserById(id);
+    if (!user) throw new Error('Failed to retrieve updated user');
+    return user;
   }
 
   async deleteUser(id: string): Promise<void> {
-    const database = await this.db;
-
     // Check if user exists
     const user = await this.getUserById(id);
     if (!user) {
@@ -183,22 +171,26 @@ export class UserService {
     }
 
     // Check if user has any friendships
-    const friendships = await database.getDatabase().all(`
-      SELECT id FROM friendships
-      WHERE user_id_1 = ? OR user_id_2 = ?
-    `, [id, id]);
+    const { count: friendshipsCount, error: countError } = await supabase
+      .from('friendships')
+      .select('*', { count: 'exact', head: true })
+      .or(`user_id_1.eq.${id},user_id_2.eq.${id}`);
 
-    if (friendships.length > 0) {
+    if (countError) throw countError;
+    if (friendshipsCount && friendshipsCount > 0) {
       throw new Error('Cannot delete user with active friendships. Remove friendships first.');
     }
 
     // Delete user (cascading will handle user_hobbies)
-    await database.getDatabase().run('DELETE FROM users WHERE id = ?', [id]);
+    const { error: deleteError } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw new Error('Failed to delete user');
   }
 
   async createFriendship(userId1: string, userId2: string): Promise<Friendship> {
-    const database = await this.db;
-
     // Ensure userId1 < userId2 for consistent ordering
     const [id1, id2] = userId1 < userId2 ? [userId1, userId2] : [userId2, userId1];
 
@@ -211,10 +203,12 @@ export class UserService {
     }
 
     // Check if friendship already exists
-    const existingFriendship = await database.getDatabase().get(
-      'SELECT id FROM friendships WHERE user_id_1 = ? AND user_id_2 = ?',
-      [id1, id2]
-    );
+    const { data: existingFriendship } = await supabase
+      .from('friendships')
+      .select('id')
+      .eq('user_id_1', id1)
+      .eq('user_id_2', id2)
+      .single();
 
     if (existingFriendship) {
       throw new Error('Friendship already exists');
@@ -226,38 +220,36 @@ export class UserService {
     }
 
     const friendshipId = uuidv4();
-    await database.getDatabase().run(
-      'INSERT INTO friendships (id, user_id_1, user_id_2) VALUES (?, ?, ?)',
-      [friendshipId, id1, id2]
-    );
+    const { data: newFriendship, error } = await supabase
+      .from('friendships')
+      .insert({ id: friendshipId, user_id_1: id1, user_id_2: id2 })
+      .select()
+      .single();
+
+    if (error || !newFriendship) throw new Error('Failed to create friendship');
 
     return {
       id: friendshipId,
       userId1: id1,
       userId2: id2,
-      createdAt: new Date().toISOString()
+      createdAt: newFriendship.created_at || new Date().toISOString()
     };
   }
 
   async removeFriendship(userId1: string, userId2: string): Promise<void> {
-    const database = await this.db;
-
     // Ensure userId1 < userId2 for consistent ordering
     const [id1, id2] = userId1 < userId2 ? [userId1, userId2] : [userId2, userId1];
 
-    const result = await database.getDatabase().run(
-      'DELETE FROM friendships WHERE user_id_1 = ? AND user_id_2 = ?',
-      [id1, id2]
-    );
+    const { error } = await supabase
+      .from('friendships')
+      .delete()
+      .eq('user_id_1', id1)
+      .eq('user_id_2', id2);
 
-    if (result.changes === 0) {
-      throw new Error('Friendship not found');
-    }
+    if (error) throw new Error('Friendship not found');
   }
 
   async getGraphData(): Promise<GraphData> {
-    const database = await this.db;
-
     // Get all users with their details
     const users = await this.getAllUsers();
 
@@ -271,11 +263,11 @@ export class UserService {
     }));
 
     // Create edges from friendships
-    const friendships = await database.getDatabase().all(`
-      SELECT id, user_id_1, user_id_2 FROM friendships
-    `);
+    const { data: friendships } = await supabase
+      .from('friendships')
+      .select('id, user_id_1, user_id_2');
 
-    const edges: GraphEdge[] = friendships.map(friendship => ({
+    const edges: GraphEdge[] = (friendships || []).map((friendship: any) => ({
       id: friendship.id,
       source: friendship.user_id_1,
       target: friendship.user_id_2
@@ -285,5 +277,55 @@ export class UserService {
       nodes,
       edges
     };
+  }
+
+  async addHobbyToUser(userId: string, hobbyName: string): Promise<void> {
+    // Check if user exists
+    const user = await this.getUserById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Get hobby id
+    let { data: hobby, error: hobbyError } = await supabase
+      .from('hobbies')
+      .select('id')
+      .eq('name', hobbyName)
+      .single();
+
+    if (hobbyError && hobbyError.code !== 'PGRST116') { // PGRST116 is no rows
+      throw new Error('Failed to fetch hobby');
+    }
+
+    let hobbyId: string;
+    if (!hobby) {
+      hobbyId = uuidv4();
+      const { error: insertError } = await supabase
+        .from('hobbies')
+        .insert({ id: hobbyId, name: hobbyName });
+
+      if (insertError) throw new Error('Failed to create hobby');
+    } else {
+      hobbyId = hobby.id;
+    }
+
+    // Check if hobby already assigned to user
+    const { data: existingHobby } = await supabase
+      .from('user_hobbies')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('hobby_id', hobbyId)
+      .single();
+
+    if (existingHobby) {
+      throw new Error('Hobby already assigned to user');
+    }
+
+    // Assign hobby to user
+    const { error: assignError } = await supabase
+      .from('user_hobbies')
+      .insert({ user_id: userId, hobby_id: hobbyId });
+
+    if (assignError) throw new Error('Failed to assign hobby');
   }
 }

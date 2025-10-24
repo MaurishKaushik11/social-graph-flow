@@ -1,11 +1,9 @@
-import { getDatabase } from './connection.js';
+import { supabase } from './connection.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function runMigrations(): Promise<void> {
-  const db = await getDatabase();
-
   try {
-    // Insert default hobbies
+    // Insert default hobbies - only insert if they don't exist
     const defaultHobbies = [
       'Reading', 'Gaming', 'Cooking', 'Hiking', 'Photography',
       'Music', 'Painting', 'Dancing', 'Sports', 'Traveling',
@@ -13,13 +11,23 @@ export async function runMigrations(): Promise<void> {
     ];
 
     for (const hobbyName of defaultHobbies) {
-      await db.getDatabase().run(
-        'INSERT OR IGNORE INTO hobbies (id, name) VALUES (?, ?)',
-        [uuidv4(), hobbyName]
-      );
+      // Check if hobby already exists
+      const { data: existing } = await supabase
+        .from('hobbies')
+        .select('id')
+        .eq('name', hobbyName)
+        .single();
+
+      if (!existing) {
+        const { error } = await supabase
+          .from('hobbies')
+          .insert({ id: uuidv4(), name: hobbyName });
+
+        if (error) throw error;
+      }
     }
 
-    // Insert sample users
+    // Insert sample users - only insert if they don't exist
     const sampleUsers = [
       { username: 'Alice', age: 28 },
       { username: 'Bob', age: 32 },
@@ -29,10 +37,20 @@ export async function runMigrations(): Promise<void> {
     ];
 
     for (const user of sampleUsers) {
-      await db.getDatabase().run(
-        'INSERT OR IGNORE INTO users (id, username, age) VALUES (?, ?, ?)',
-        [uuidv4(), user.username, user.age]
-      );
+      // Check if user already exists
+      const { data: existing } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', user.username)
+        .single();
+
+      if (!existing) {
+        const { error } = await supabase
+          .from('users')
+          .insert({ id: uuidv4(), username: user.username, age: user.age });
+
+        if (error) throw error;
+      }
     }
 
     console.log('✅ Database migrations completed successfully');

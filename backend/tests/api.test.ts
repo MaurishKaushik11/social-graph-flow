@@ -1,29 +1,27 @@
 import request from 'supertest';
 import express from 'express';
 import { randomUUID } from 'crypto';
-import apiRoutes from '../src/routes/api.js';
+import apiRoutes from '../src/routes/api';
 import { UserService } from '../src/services/userService.js';
-import { getDatabase } from '../src/database/connection.js';
+import { supabase } from '../src/database/connection.js';
 
 const app = express();
 app.use(express.json());
 app.use('/api', apiRoutes);
 
 describe('Cybernauts API Tests', () => {
-  let db: any;
   let userService: UserService;
 
   beforeAll(async () => {
-    db = await getDatabase();
     userService = new UserService();
   });
 
   beforeEach(async () => {
     // Clear database before each test
-    await db.getDatabase().run('DELETE FROM friendships');
-    await db.getDatabase().run('DELETE FROM user_hobbies');
-    await db.getDatabase().run('DELETE FROM users');
-    await db.getDatabase().run('DELETE FROM hobbies');
+    await supabase.from('friendships').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('user_hobbies').delete().neq('user_id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('hobbies').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   });
 
   describe('User Management', () => {
@@ -142,12 +140,11 @@ describe('Cybernauts API Tests', () => {
   });
 
   describe('Popularity Score Calculation', () => {
-    let user1: any, user2: any, user3: any;
+    let user1: any, user2: any;
 
     beforeEach(async () => {
       user1 = await userService.createUser({ username: 'user1', age: 25 });
       user2 = await userService.createUser({ username: 'user2', age: 30 });
-      user3 = await userService.createUser({ username: 'user3', age: 28 });
     });
 
     test('should calculate score for user with no friends', async () => {
@@ -166,23 +163,17 @@ describe('Cybernauts API Tests', () => {
 
     test('should calculate score with shared hobbies', async () => {
       // Add same hobby to both users
-      const hobby1 = await db.getDatabase().run(
-        'INSERT INTO hobbies (id, name) VALUES (?, ?)',
-        [randomUUID(), 'Reading']
-      );
-      const hobby2 = await db.getDatabase().run(
-        'INSERT INTO hobbies (id, name) VALUES (?, ?)',
-        [randomUUID(), 'Reading']
-      );
+      const hobbyId = randomUUID();
+      await supabase
+        .from('hobbies')
+        .insert({ id: hobbyId, name: 'Reading' });
 
-      await db.getDatabase().run(
-        'INSERT INTO user_hobbies (user_id, hobby_id) VALUES (?, ?)',
-        [user1.id, hobby1.lastID]
-      );
-      await db.getDatabase().run(
-        'INSERT INTO user_hobbies (user_id, hobby_id) VALUES (?, ?)',
-        [user2.id, hobby2.lastID]
-      );
+      await supabase
+        .from('user_hobbies')
+        .insert([
+          { user_id: user1.id, hobby_id: hobbyId },
+          { user_id: user2.id, hobby_id: hobbyId }
+        ]);
 
       await userService.createFriendship(user1.id, user2.id);
 

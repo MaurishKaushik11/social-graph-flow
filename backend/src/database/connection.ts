@@ -1,18 +1,13 @@
-import { DatabaseConnection } from './schema.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 
-let dbInstance: DatabaseConnection | null = null;
+dotenv.config();
 
-export async function getDatabase(): Promise<DatabaseConnection> {
-  if (!dbInstance) {
-    dbInstance = new DatabaseConnection();
-    await dbInstance.initialize();
-  }
-  return dbInstance;
+const supabaseUrl = process.env.SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_ANON_KEY!;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Missing Supabase environment variables');
 }
 
-export async function closeDatabase(): Promise<void> {
-  if (dbInstance) {
-    await dbInstance.getDatabase().close();
-    dbInstance = null;
-  }
-}
+export const supabase = createClient(supabaseUrl, supabaseKey);

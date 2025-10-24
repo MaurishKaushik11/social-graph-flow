@@ -1,12 +1,12 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { getDatabase, closeDatabase } from './database/connection.js';
+import { supabase } from './database/connection.js';
 import { runMigrations } from './database/migrate.js';
 import apiRoutes from './routes/api.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 // Security middleware
 app.use(helmet());
@@ -53,8 +53,9 @@ async function startServer() {
   try {
     console.log('🚀 Starting Cybernauts Backend Server...');
 
-    // Initialize database
-    await getDatabase();
+    // Test Supabase connection
+    const { error } = await supabase.from('users').select('count').limit(1);
+    if (error) throw error;
     console.log('✅ Database connected');
 
     // Run migrations
@@ -76,13 +77,11 @@ async function startServer() {
 // Handle graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('📴 Received SIGTERM, shutting down gracefully...');
-  await closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('📴 Received SIGINT, shutting down gracefully...');
-  await closeDatabase();
   process.exit(0);
 });
 

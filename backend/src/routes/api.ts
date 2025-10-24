@@ -2,10 +2,10 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { UserService } from '../services/userService.js';
-import { createUserSchema, updateUserSchema, userIdSchema, friendshipSchema } from '../validation.js';
-import type { ApiResponse, ValidationError } from '../types.js';
-import { getDatabase } from '../database/connection.js';
+import { UserService } from '../services/userService';
+import { createUserSchema, updateUserSchema, userIdSchema, friendshipSchema } from '../validation';
+import type { ApiResponse, ValidationError } from '../types';
+import { supabase } from '../database/connection';
 
 const router = express.Router();
 const userService = new UserService();
@@ -45,6 +45,7 @@ router.get('/users', limiter, async (req, res) => {
     };
     res.status(500).json(response);
   }
+  return;
 });
 
 // POST /api/users - Create new user
@@ -76,6 +77,7 @@ router.post('/users', limiter, async (req, res) => {
     };
     res.status(500).json(response);
   }
+  return;
 });
 
 // GET /api/users/:id - Get user by ID
@@ -113,6 +115,7 @@ router.get('/users/:id', limiter, async (req, res) => {
     };
     res.status(500).json(response);
   }
+  return;
 });
 
 // PUT /api/users/:id - Update user
@@ -146,6 +149,7 @@ router.put('/users/:id', limiter, async (req, res) => {
     };
     res.status(error?.message?.includes('not found') ? 404 : 500).json(response);
   }
+  return;
 });
 
 // DELETE /api/users/:id - Delete user
@@ -178,6 +182,7 @@ router.delete('/users/:id', limiter, async (req, res) => {
     };
     res.status(statusCode).json(response);
   }
+  return;
 });
 
 // POST /api/users/:id/link - Create friendship
@@ -214,6 +219,7 @@ router.post('/users/:id/link', limiter, async (req, res) => {
     };
     res.status(statusCode).json(response);
   }
+  return;
 });
 
 // DELETE /api/users/:id/unlink - Remove friendship
@@ -248,6 +254,7 @@ router.delete('/users/:id/unlink', limiter, async (req, res) => {
     };
     res.status(statusCode).json(response);
   }
+  return;
 });
 
 // GET /api/graph - Get graph data
@@ -268,6 +275,7 @@ router.get('/graph', limiter, async (req, res) => {
     };
     res.status(500).json(response);
   }
+  return;
 });
 
 // POST /api/users/:id/hobbies - Add hobby to user
@@ -277,26 +285,28 @@ router.post('/users/:id/hobbies', limiter, async (req, res) => {
     const { hobbyName } = z.object({ hobbyName: z.string() }).parse(req.body);
 
     // Check if hobby exists, if not create it
-    const database = await getDatabase();
-    let hobby = await database.getDatabase().get(
-      'SELECT id FROM hobbies WHERE name = ?',
-      [hobbyName]
-    );
+    let { data: hobby } = await supabase
+      .from('hobbies')
+      .select('id')
+      .eq('name', hobbyName)
+      .single();
 
     if (!hobby) {
       const hobbyId = uuidv4();
-      await database.getDatabase().run(
-        'INSERT INTO hobbies (id, name) VALUES (?, ?)',
-        [hobbyId, hobbyName]
-      );
+      const { error } = await supabase
+        .from('hobbies')
+        .insert({ id: hobbyId, name: hobbyName });
+
+      if (error) throw error;
       hobby = { id: hobbyId };
     }
 
     // Add hobby to user (if not already added)
-    await database.getDatabase().run(
-      'INSERT OR IGNORE INTO user_hobbies (user_id, hobby_id) VALUES (?, ?)',
-      [id, hobby.id]
-    );
+    const { error } = await supabase
+      .from('user_hobbies')
+      .upsert({ user_id: id, hobby_id: hobby.id }, { onConflict: 'user_id,hobby_id' });
+
+    if (error) throw error;
 
     const response: ApiResponse<null> = {
       success: true,
@@ -320,6 +330,7 @@ router.post('/users/:id/hobbies', limiter, async (req, res) => {
     };
     res.status(error?.message?.includes('not found') ? 404 : 500).json(response);
   }
+  return;
 });
 
 // DELETE /api/users/:id/hobbies/:hobbyName - Remove hobby from user
@@ -328,13 +339,12 @@ router.delete('/users/:id/hobbies/:hobbyName', limiter, async (req, res) => {
     const { id } = userIdSchema.parse({ id: req.params.id });
     const { hobbyName } = z.object({ hobbyName: z.string() }).parse({ hobbyName: req.params.hobbyName });
 
-    const database = await getDatabase();
-
     // Get hobby ID
-    const hobby = await database.getDatabase().get(
-      'SELECT id FROM hobbies WHERE name = ?',
-      [hobbyName]
-    );
+    const { data: hobby } = await supabase
+      .from('hobbies')
+      .select('id')
+      .eq('name', hobbyName)
+      .single();
 
     if (!hobby) {
       const response: ApiResponse<null> = {
@@ -345,18 +355,13 @@ router.delete('/users/:id/hobbies/:hobbyName', limiter, async (req, res) => {
     }
 
     // Remove hobby from user
-    const result = await database.getDatabase().run(
-      'DELETE FROM user_hobbies WHERE user_id = ? AND hobby_id = ?',
-      [id, hobby.id]
-    );
+    const { error } = await supabase
+      .from('user_hobbies')
+      .delete()
+      .eq('user_id', id)
+      .eq('hobby_id', hobby.id);
 
-    if (result.changes === 0) {
-      const response: ApiResponse<null> = {
-        success: false,
-        error: 'Hobby not assigned to user'
-      };
-      return res.status(404).json(response);
-    }
+    if (error) throw error;
 
     const response: ApiResponse<null> = {
       success: true,
@@ -380,6 +385,7 @@ router.delete('/users/:id/hobbies/:hobbyName', limiter, async (req, res) => {
     };
     res.status(500).json(response);
   }
+  return;
 });
 
 export default router;
