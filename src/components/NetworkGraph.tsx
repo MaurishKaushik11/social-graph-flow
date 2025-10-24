@@ -14,8 +14,8 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { UserNode } from './UserNode';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
 
 interface NetworkGraphProps {
   onUserSelect: (userId: string | null) => void;
@@ -34,54 +34,15 @@ export const NetworkGraph = ({ onUserSelect, refreshTrigger }: NetworkGraphProps
   const loadGraphData = useCallback(async () => {
     try {
       setLoading(true);
-
-      // Fetch all users
-      const { data: users, error: usersError } = await supabase
-        .from('users')
-        .select('*');
-
-      if (usersError) throw usersError;
-
-      // Fetch all friendships
-      const { data: friendships, error: friendshipsError } = await supabase
-        .from('friendships')
-        .select('*');
-
-      if (friendshipsError) throw friendshipsError;
-
-      // Fetch all user hobbies
-      const { data: userHobbies, error: hobbiesError } = await supabase
-        .from('user_hobbies')
-        .select('user_id, hobby_id, hobbies(name)');
-
-      if (hobbiesError) throw hobbiesError;
-
-      // Calculate popularity scores for all users
-      const usersWithScores = await Promise.all(
-        (users || []).map(async (user) => {
-          const { data: scoreData } = await supabase
-            .rpc('calculate_popularity_score', { user_uuid: user.id });
-          
-          const hobbies = (userHobbies || [])
-            .filter((uh: any) => uh.user_id === user.id)
-            .map((uh: any) => uh.hobbies?.name)
-            .filter(Boolean);
-
-          return {
-            ...user,
-            popularityScore: scoreData || 0,
-            hobbies,
-          };
-        })
-      );
+      const graphData = await api.getGraphData();
 
       // Create nodes with circular layout
       const radius = 250;
       const centerX = 400;
       const centerY = 300;
-      
-      const newNodes: Node[] = usersWithScores.map((user, index) => {
-        const angle = (index / usersWithScores.length) * 2 * Math.PI;
+
+      const newNodes: Node[] = graphData.nodes.map((user, index) => {
+        const angle = (index / graphData.nodes.length) * 2 * Math.PI;
         const x = centerX + radius * Math.cos(angle);
         const y = centerY + radius * Math.sin(angle);
 
@@ -108,10 +69,10 @@ export const NetworkGraph = ({ onUserSelect, refreshTrigger }: NetworkGraphProps
       });
 
       // Create edges from friendships
-      const newEdges: Edge[] = (friendships || []).map((friendship) => ({
-        id: friendship.id,
-        source: friendship.user_id_1,
-        target: friendship.user_id_2,
+      const newEdges: Edge[] = graphData.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
         type: 'straight',
         animated: true,
         style: {
@@ -138,22 +99,22 @@ export const NetworkGraph = ({ onUserSelect, refreshTrigger }: NetworkGraphProps
     loadGraphData();
   }, [loadGraphData, refreshTrigger]);
 
+  // Listen for refresh events from drag and drop
+  useEffect(() => {
+    const handleRefreshGraph = () => {
+      loadGraphData();
+    };
+
+    window.addEventListener('refreshGraph', handleRefreshGraph);
+    return () => window.removeEventListener('refreshGraph', handleRefreshGraph);
+  }, [loadGraphData]);
+
   const onConnect = useCallback(
     async (connection: Connection) => {
       if (!connection.source || !connection.target) return;
 
       try {
-        const [userId1, userId2] = [connection.source, connection.target].sort();
-
-        const { error } = await supabase
-          .from('friendships')
-          .insert({
-            user_id_1: userId1,
-            user_id_2: userId2,
-          });
-
-        if (error) throw error;
-
+        await api.createFriendship(connection.source, connection.target);
         toast.success('Friendship created!');
         loadGraphData();
       } catch (error: any) {

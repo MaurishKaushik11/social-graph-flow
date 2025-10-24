@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -65,33 +65,8 @@ export const UserManagementPanel = ({
 
   const loadUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Load hobbies and scores for each user
-      const usersWithDetails = await Promise.all(
-        (data || []).map(async (user) => {
-          const { data: hobbiesData } = await supabase
-            .from('user_hobbies')
-            .select('hobbies(name)')
-            .eq('user_id', user.id);
-
-          const { data: scoreData } = await supabase
-            .rpc('calculate_popularity_score', { user_uuid: user.id });
-
-          return {
-            ...user,
-            hobbies: hobbiesData?.map((h: any) => h.hobbies?.name).filter(Boolean) || [],
-            popularityScore: scoreData || 0,
-          };
-        })
-      );
-
-      setUsers(usersWithDetails);
+      const users = await api.getUsers();
+      setUsers(users);
     } catch (error: any) {
       console.error('Error loading users:', error);
       toast.error('Failed to load users');
@@ -115,20 +90,17 @@ export const UserManagementPanel = ({
     try {
       if (selectedUser) {
         // Update existing user
-        const { error } = await supabase
-          .from('users')
-          .update({ username: username.trim(), age: ageNum })
-          .eq('id', selectedUser.id);
-
-        if (error) throw error;
+        await api.updateUser(selectedUser.id, { 
+          username: username.trim(), 
+          age: ageNum 
+        });
         toast.success('User updated successfully!');
       } else {
         // Create new user
-        const { error } = await supabase
-          .from('users')
-          .insert({ username: username.trim(), age: ageNum });
-
-        if (error) throw error;
+        await api.createUser({ 
+          username: username.trim(), 
+          age: ageNum 
+        });
         toast.success('User created successfully!');
       }
 
@@ -150,29 +122,7 @@ export const UserManagementPanel = ({
 
     setLoading(true);
     try {
-      // Check if user has friendships
-      const { data: friendships, error: friendshipsError } = await supabase
-        .from('friendships')
-        .select('id')
-        .or(`user_id_1.eq.${deleteUserId},user_id_2.eq.${deleteUserId}`)
-        .limit(1);
-
-      if (friendshipsError) throw friendshipsError;
-
-      if (friendships && friendships.length > 0) {
-        toast.error('Cannot delete user with active friendships. Remove friendships first.');
-        setDeleteUserId(null);
-        setLoading(false);
-        return;
-      }
-
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', deleteUserId);
-
-      if (error) throw error;
-
+      await api.deleteUser(deleteUserId);
       toast.success('User deleted successfully!');
       setDeleteUserId(null);
       if (selectedUserId === deleteUserId) {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NetworkGraph } from '@/components/NetworkGraph';
 import { HobbiesSidebar } from '@/components/HobbiesSidebar';
 import { UserManagementPanel } from '@/components/UserManagementPanel';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { Network } from 'lucide-react';
 
@@ -22,33 +22,17 @@ const Index = () => {
       return;
     }
 
-    const hobbyId = e.dataTransfer.getData('hobbyId');
     const hobbyName = e.dataTransfer.getData('hobbyName');
 
-    if (!hobbyId) return;
+    if (!hobbyName) return;
 
     try {
-      const { error } = await supabase
-        .from('user_hobbies')
-        .insert({
-          user_id: selectedUserId,
-          hobby_id: hobbyId,
-        });
-
-      if (error) {
-        if (error.code === '23505') {
-          toast.error('User already has this hobby');
-        } else {
-          throw error;
-        }
-        return;
-      }
-
+      await api.addHobbyToUser(selectedUserId, hobbyName);
       toast.success(`Added ${hobbyName} to user!`);
       handleUserChange();
     } catch (error: any) {
       console.error('Error adding hobby:', error);
-      toast.error('Failed to add hobby');
+      toast.error(error?.message || 'Failed to add hobby');
     }
   };
 
